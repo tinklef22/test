@@ -110,6 +110,63 @@ const convertMongoToSql = (mongoQuery) => {
   return `WHERE ${where} ${sort} ${limit} ${skip}`.trim().replace(/\s+/g, " ");
 };
 
+const condToSql = (cond) => {
+  const [condition, trueValue, falseValue] = cond;
+  const sqlCondition = whereClause(condition);
+  const sqlTrueValue = convertValue(trueValue);
+  const sqlFalseValue = convertValue(falseValue);
+
+  return `CASE WHEN ${sqlCondition} THEN ${sqlTrueValue} ELSE ${sqlFalseValue} END`;
+};
+
+const ifNullToSql = ([field, defaultValue]) => {
+  const sqlField = field.slice(1); // Remove the $ from the field name
+  const sqlDefaultValue = convertValue(defaultValue);
+
+  return `COALESCE(${sqlField}, ${sqlDefaultValue})`;
+};
+
+const switchToSql = (switchExpression) => {
+  const { branches, default: defaultValue } = switchExpression;
+  const cases = branches
+    .map(({ case: condition, then: value }) => {
+      const sqlCondition = whereClause(condition);
+      const sqlValue = convertValue(value);
+
+      return `WHEN ${sqlCondition} THEN ${sqlValue}`;
+    })
+    .join(" ");
+
+  const sqlDefaultValue = convertValue(defaultValue);
+
+  return `CASE ${cases} ELSE ${sqlDefaultValue} END`;
+};
+
+const expressionToSql = (expression) => {
+  const operator = Object.keys(expression)[0];
+  const value = expression[operator];
+
+  switch (operator) {
+    case "$cond":
+      return condToSql(value);
+    case "$ifNull":
+      return ifNullToSql(value);
+    case "$switch":
+      return switchToSql(value);
+    case "$eq":
+    case "$ne":
+    case "$gt":
+    case "$gte":
+    case "$lt":
+    case "$lte":
+    case "$and":
+    case "$or":
+      return whereClause({ [operator]: value });
+    default:
+      return "";
+  }
+};
+
 const pipelineToSql = (pipeline, tableName) => {
   let sql = `SELECT * FROM ${tableName}`;
   let groupBy = "";
@@ -128,7 +185,9 @@ const pipelineToSql = (pipeline, tableName) => {
 
         Object.entries(stageValue).forEach(([field, value]) => {
           if (field === "_id") {
-            if (value !== null) {
+            if (typeof value === "object") {
+              groupFields.push(expressionToSql(value));
+            } else {
               groupFields.push(value.slice(1)); // Remove the $ from the field name
             }
           } else {
@@ -166,7 +225,6 @@ const pipelineToSql = (pipeline, tableName) => {
         break;
       case "$limit":
         sql += ` ${limitClause(stageValue)}`;
-
         break;
       case "$count":
         groupBy = ""; // Clear the groupBy clause
@@ -208,8 +266,124 @@ const setStatement = (data) =>
     .map(([column, value]) => `${column} = '${value}'`)
     .join(", ");
 
+const fromJSON = (table, definition, target) => {
+  const columnTypes = {
+    string: {
+      mysql: "VARCHAR(255)",
+      postgres: "TEXT",
+      mssql: "NVARCHAR(255)",
+      oracle: "VARCHAR2(255)",
+      default: "TEXT",
+    },
+    number: {
+      mysql: "INT",
+      postgres: "INTEGER",
+      mssql: "INT",
+      oracle: "NUMBER",
+      default: "INTEGER",
+    },
+    boolean: {
+      mysql: "BOOLEAN",
+      postgres: "BOOLEAN",
+      mssql: "BIT",
+      oracle: "NUMBER(1)",
+      default: "BOOLEAN",
+    },
+    date: {
+      mysql: "DATETIME",
+      postgres: "TIMESTAMP",
+      mssql: "DATETIME2",
+      oracle: "DATE",
+      default: "TIMESTAMP",
+    },
+    default: {
+      mysql: "TEXT",
+      postgres: "TEXT",
+      mssql: "TEXT",
+      oracle: "VARCHAR2(4000)",
+      default: "TEXT",
+    },
+  };
+
+  let sqlQuery = `CREATE TABLE ${table} (`;
+
+  for (let column of definition.columns) {
+    sqlQuery += `${column.name} `;
+
+    const type =
+      columnTypes[column.native] ||
+      columnTypes[column.type] ||
+      columnTypes.default;
+    const columnType = type[target] || type.default;
+
+    sqlQuery += columnType;
+
+    if (column.primaryKey) {
+      sqlQuery += " PRIMARY KEY";
+    }
+
+    if (column.unique) {
+      sqlQuery += " UNIQUE";
+    }
+
+    if (!column.nullable) {
+      sqlQuery += " NOT NULL";
+    }
+
+    if (column.autoIncrement) {
+      const autoIncrement = {
+        mysql: " AUTO_INCREMENT",
+        postgres: " GENERATED ALWAYS AS IDENTITY",
+        mssql: " IDENTITY(1,1)",
+        oracle: " GENERATED ALWAYS AS IDENTITY",
+        default: " AUTO_INCREMENT",
+      };
+      const autoIncrementType = autoIncrement[target] || autoIncrement.default;
+      sqlQuery += autoIncrementType;
+    }
+
+    sqlQuery += ",";
+  }
+
+  // Remove the last comma from the statement
+  sqlQuery = sqlQuery.slice(0, -1);
+
+  sqlQuery += ")";
+
+  return sqlQuery;
+};
+
 const Table = (table) => {
   return {
+    jsonTable: fromJSON,
+    alter: {
+      add: (columns) => {
+        const columnsSql = columns
+          .map(({ name, type }) => `${name} ${type}`)
+          .join(", ");
+        return `ALTER TABLE ${table} ADD (${columnsSql})`;
+      },
+      drop: (columnNames) => {
+        const columnsSql = columnNames
+          .map((name) => `DROP COLUMN ${name}`)
+          .join(", ");
+        return `ALTER TABLE ${table} ${columnsSql}`;
+      },
+      rename: (columnMappings) => {
+        const columnsSql = columnMappings
+          .map(
+            ({ oldName, newName }) => `RENAME COLUMN ${oldName} TO ${newName}`
+          )
+          .join(", ");
+        return `ALTER TABLE ${table} ${columnsSql}`;
+      },
+      modify: (columnModifications) => {
+        const columnsSql = columnModifications
+          .map(({ name, type }) => `MODIFY COLUMN ${name} ${type}`)
+          .join(", ");
+        return `ALTER TABLE ${table} ${columnsSql}`;
+      },
+    },
     aggregate: (mongoQuery) => {
       if (!mongoQuery) return "";
       return pipelineToSql(mongoQuery, table);
@@ -248,4 +422,4 @@ const Table = (table) => {
   };
 };
 
-module.exports = Table;
+export default Table;

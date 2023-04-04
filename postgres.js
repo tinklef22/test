@@ -621,13 +621,9 @@ const testCases = [
       },
       { $sort: { totalsalary: "DESC" } },
       { $limit: 1 },
-      //   {
-      //   },
-      //   {
-      //     // $limit: 3,
-      //   },
+      
     ],
-    output: [],
+    output: [{ totalsalary: "138545479" }],
   },
 ];
 
