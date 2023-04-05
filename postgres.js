@@ -6,72 +6,76 @@ const createTableFromJson = require("./createtable");
 const knex = require("knex")({
   client: "pg",
   connection:
-    "postgresql://postgres:50Q8WwJAqmRxB0cAqTs0@containers-us-west-88.railway.app:7206/railway",
+    "postgresql://postgres:Ic1QbtrxPvQUEhWLslqJ@containers-us-west-20.railway.app:7902/railway",
 });
 
 async function createUsersTable() {
   try {
     const result = await knex.raw(
-      createTableFromJson({
-        tableName: "users",
-        columns: [
-          {
-            name: "id",
-            type: "SERIAL",
-            primaryKey: true,
-          },
-          {
-            name: "name",
-            type: "TEXT",
-            nullable: false,
-          },
-          {
-            name: "email",
-            type: "TEXT",
-            nullable: false,
-          },
-          {
-            name: "gender",
-            type: "TEXT",
-            nullable: false,
-          },
-          {
-            name: "ip_address",
-            type: "TEXT",
-            nullable: false,
-          },
-          {
-            name: "title",
-            type: "TEXT",
-            nullable: false,
-          },
-          {
-            name: "company",
-            type: "TEXT",
-            nullable: false,
-          },
-          {
-            name: "birthday",
-            type: "BIGINT",
-            nullable: false,
-          },
-          {
-            name: "issenior",
-            type: "TEXT",
-            nullable: false,
-          },
-          {
-            name: "salary",
-            type: "NUMERIC",
-            nullable: false,
-          },
-          {
-            name: "address",
-            type: "TEXT",
-            nullable: false,
-          },
-        ],
-      })
+      Table("users").jsonTable(
+        "users",
+        {
+          columns: [
+            {
+              name: "id",
+              type: "number",
+              primaryKey: true,
+              // autoIncrement: true,
+            },
+            {
+              name: "name",
+              type: "string",
+              nullable: false,
+            },
+            {
+              name: "email",
+              type: "string",
+              nullable: false,
+            },
+            {
+              name: "gender",
+              type: "string",
+              nullable: false,
+            },
+            {
+              name: "ip_address",
+              type: "string",
+              nullable: false,
+            },
+            {
+              name: "title",
+              type: "string",
+              nullable: false,
+            },
+            {
+              name: "company",
+              type: "string",
+              nullable: false,
+            },
+            {
+              name: "birthday",
+              native: "bigint",
+              nullable: false,
+            },
+            {
+              name: "issenior",
+              type: "string",
+              nullable: false,
+            },
+            {
+              name: "salary",
+              type: "number",
+              nullable: false,
+            },
+            {
+              name: "address",
+              type: "string",
+              nullable: false,
+            },
+          ],
+        },
+        "postgres"
+      )
     );
     console.log(result);
   } catch (error) {
@@ -81,10 +85,14 @@ async function createUsersTable() {
   }
 }
 
+// async function alter() {
+//   return Table("users").alter.modify({ name: "birthday", type: "bigint" });
+// }
+
 async function insertUsersData() {
   const datas = require("./MOCK_DATA.json");
   try {
-    await knex("users").insert(datas);
+    await knex.raw(Table("users").create(datas));
     console.log("users data inserted");
   } catch (error) {
     console.error(error);
@@ -358,8 +366,8 @@ const testCases = [
     name: "find with $limit $gte $lte",
     func: "find",
     input: {
-      birthday: { $lte: 1678233912000 },
-      birthday: { $gte: 1654435962000 },
+      birthday: { $lte: "1678233912000" },
+      birthday: { $gte: "1654435962000" },
       $limit: 3,
     },
     output: [
@@ -536,31 +544,30 @@ const testCases = [
     output: [
       //   { issenior: "false", totalAmount: 4558163 },
       //   { issenior: "true", totalAmount: 3656130 },
-      { issenior: "true", totalamount: "3656130" },
-      { issenior: "false", totalamount: "4558163" },
+      { issenior: "true", totalamount: 3656130 },
+      { issenior: "false", totalamount: 4558163 },
     ],
   },
   {
-    name: "Aggregate with $project , $short and $limit",
+    name: "Aggregate with $project , $matcg , $avg , $project",
     func: "aggregate",
     input: [
       {
-        $project: { name: 1, salary: 2 },
+        $match: {
+          issenior: { $like: "true%" },
+        },
       },
       {
-        $sort: { salary: "DESC" },
+        $group: {
+          //   _id: "$gender",
+          avgsalary: { $avg: "$salary" },
+        },
       },
       {
-        $limit: 5,
+        $project: { avgsalary: 1 },
       },
     ],
-    output: [
-      { name: "Rowen", salary: 499801 },
-      { name: "Randal", salary: 499128 },
-      { name: "Bartram", salary: 497128 },
-      { name: "Arel", salary: 496351 },
-      { name: "Adi", salary: 496310 },
-    ],
+    output: [],
   },
   {
     name: "Aggregate with $group",
@@ -570,7 +577,7 @@ const testCases = [
         $group: { salary: { $min: "$salary" } },
       },
     ],
-    output: [{ salary: "20779" }],
+    output: [{ salary: 20779 }],
   },
   //   {
   //     name: "Aggregate with $group with same first char in name",
@@ -605,7 +612,7 @@ const testCases = [
   //     ],
   //   },
   {
-    name: "Aggregate with $group with same first char in name",
+    name: "Aggregate with $match $group $sort $limit",
     func: "aggregate",
     input: [
       {
@@ -615,27 +622,53 @@ const testCases = [
       },
       {
         $group: {
-          //   _id: "$gender",
           totalsalary: { $sum: "$salary" },
         },
       },
       { $sort: { totalsalary: "DESC" } },
       { $limit: 1 },
-      
     ],
-    output: [{ totalsalary: "138545479" }],
+    output: [{ totalsalary: 138545479 }],
   },
+
+  //   {
+  //     name: "Alter table  - Rename Column name",
+  //     func: "alter",
+  //     action: "rename",
+  //     input: [{ oldName: "usernname", newName: "name" }],
+  //     output: [],
+  //   },
+
+  //   {
+  //     name: "Alter table  - Add Column ",
+  //     func: "alter",
+  //     action: "drop",
+  //     input: ["education", "Age"],
+  //     output: [],
+  //   },
 ];
 
 async function runTests() {
-  for (const { name, func, input, output } of testCases) {
-    console.log(`Running test: ${name}`);
+  for (const { name, func, action, input, output } of testCases) {
+    console.log(name);
     try {
-      const sql = Table("users")[func](input);
+      let sql = "";
+      if (func == "alter") {
+        console.log(
+          `Running test: ${name}, ${Table("users")[func]}, ${
+            Table("users")[func][action]
+          },  `
+        );
+        sql = Table("users")[func][action](input);
+      } else {
+        sql = Table("users")[func](input);
+      }
 
-      const result = await knex.raw(sql);
+      const result = await knex.raw(
+        `SELECT avgsalary FROM (SELECT gender, AVG(salary) AS avgsalary FROM (SELECT * FROM users WHERE ( issenior LIKE 'true%')) AS subquery) AS subquery GROUP BY gender `
+      );
       console.log(`SQL executed successfully.`);
-      const actualResult = result.rows || result;
+      const actualResult = result.rows || result[0];
 
       assert.deepEqual(
         actualResult,

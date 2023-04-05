@@ -232,7 +232,7 @@ const pipelineToSql = (pipeline, tableName) => {
         break;
     }
   });
-
+  console.log(sql + groupBy);
   return sql + groupBy;
 };
 
@@ -310,11 +310,9 @@ const fromJSON = (table, definition, target) => {
   for (let column of definition.columns) {
     sqlQuery += `${column.name} `;
 
-    const type =
-      columnTypes[column.native] ||
-      columnTypes[column.type] ||
-      columnTypes.default;
-    const columnType = type[target] || type.default;
+    const type = columnTypes[column.type] || columnTypes.default;
+    const columnType =
+      column.native?.toUpperCase() || type[target] || type.default;
 
     sqlQuery += columnType;
 
@@ -354,20 +352,23 @@ const fromJSON = (table, definition, target) => {
 };
 
 const Table = (table) => {
+  const dbType = "postgres";
   return {
     jsonTable: fromJSON,
     alter: {
       add: (columns) => {
         const columnsSql = columns
-          .map(({ name, type }) => `${name} ${type}`)
+          .map(({ name, type }) => `ADD ${name} ${type}`)
           .join(", ");
-        return `ALTER TABLE ${table} ADD (${columnsSql})`;
+        let sql = `ALTER TABLE ${table} ${columnsSql}`;
+        return sql;
       },
       drop: (columnNames) => {
         const columnsSql = columnNames
           .map((name) => `DROP COLUMN ${name}`)
           .join(", ");
-        return `ALTER TABLE ${table} ${columnsSql}`;
+        let sql = `ALTER TABLE ${table} ${columnsSql}`;
+        return sql;
       },
       rename: (columnMappings) => {
         const columnsSql = columnMappings
@@ -375,13 +376,31 @@ const Table = (table) => {
             ({ oldName, newName }) => `RENAME COLUMN ${oldName} TO ${newName}`
           )
           .join(", ");
-        return `ALTER TABLE ${table} ${columnsSql}`;
+        let sql = `ALTER TABLE ${table} ${columnsSql}`;
+        if (dbType === "mssql") {
+          sql = `EXEC sp_rename '${table}.${oldName}', '${newName}', 'COLUMN'`;
+        }
+        return sql;
       },
       modify: (columnModifications) => {
-        const columnsSql = columnModifications
-          .map(({ name, type }) => `MODIFY COLUMN ${name} ${type}`)
-          .join(", ");
-        return `ALTER TABLE ${table} ${columnsSql}`;
+        let sql = "";
+        if (dbType === "postgres" || dbType === "mssql") {
+          const columnsSqlPostgres = columnModifications
+            .map(
+              ({ name, type }) =>
+                `ALTER TABLE ${table} ALTER COLUMN ${name} TYPE ${type}`
+            )
+            .join("; ");
+          sql = `${columnsSqlPostgres};`;
+        } else {
+          const columnsSql = columnModifications
+            .map(
+              ({ name, type }) => `ALTER TABLE ${table} MODIFY ${name} ${type}`
+            )
+            .join("; ");
+          sql = `${columnsSql};`;
+        }
+        return sql;
       },
     },
     aggregate: (mongoQuery) => {
@@ -422,4 +441,4 @@ const Table = (table) => {
   };
 };
 
-export default Table;
+module.exports = Table;
